@@ -1,5 +1,6 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "./server.js";
+import { createAuthFromEnv } from "./auth/oauth.js";
 import { startHttpTransport } from "./transport/http.js";
 
 function parseArgs(): { transport: "stdio" | "http"; port: number; host: string } {
@@ -34,10 +35,15 @@ function parseArgs(): { transport: "stdio" | "http"; port: number; host: string 
 
 async function main() {
   const config = parseArgs();
-  const server = createServer();
+const auth = createAuthFromEnv();
+const server = createServer(auth);
 
   if (config.transport === "http") {
-    await startHttpTransport(server, { port: config.port, host: config.host });
+    await startHttpTransport(server, {
+  port: config.port,
+  host: config.host,
+  auth,
+});
   } else {
     const transport = new StdioServerTransport();
     await server.connect(transport);

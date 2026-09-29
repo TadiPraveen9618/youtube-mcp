@@ -131,13 +131,23 @@ export class YouTubeAuth {
    * Load tokens from disk. Returns null if no stored tokens.
    */
   private async loadTokens(): Promise<Credentials | null> {
-    try {
-      const data = await fs.readFile(this.tokenPath, "utf-8");
-      return JSON.parse(data) as Credentials;
-    } catch {
-      return null;
-    }
+  // On Render, use the refresh token stored in an environment variable.
+  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+
+  if (refreshToken) {
+    return {
+      refresh_token: refreshToken,
+    };
   }
+
+  // Local fallback: use the token file.
+  try {
+    const data = await fs.readFile(this.tokenPath, "utf-8");
+    return JSON.parse(data) as Credentials;
+  } catch {
+    return null;
+  }
+}
 
   /**
    * Check if stored credentials exist.

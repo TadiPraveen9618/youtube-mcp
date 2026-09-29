@@ -36,15 +36,16 @@ function parseArgs(): { transport: "stdio" | "http"; port: number; host: string 
 async function main() {
   const config = parseArgs();
 const auth = createAuthFromEnv();
-const server = createServer(auth);
+
 
   if (config.transport === "http") {
-    await startHttpTransport(server, {
+    await startHttpTransport({
   port: config.port,
   host: config.host,
   auth,
 });
   } else {
+    const server = createServer(auth);
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("YouTube MCP server running on stdio");

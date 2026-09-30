@@ -72,7 +72,7 @@ export function registerVideoTools(
 
   server.tool(
     "youtube_videos_insert",
-    "Upload a video to YouTube. Requires a local file path. Quota: 1600 units.",
+    "Upload a video from a file path ON THE SERVER's disk. For files on the user's own computer, use youtube_upload_video_from_url instead. Quota: 1600 units.",
     {
       title: z.string().describe("Video title"),
       description: z.string().optional().describe("Video description"),
@@ -126,7 +126,9 @@ export function registerVideoTools(
 
   server.tool(
     "youtube_videos_update",
-    "Update a YouTube video's metadata (title, description, tags, privacy). Quota: 50 units.",
+    "Update a YouTube video's metadata (title, description, tags, category, privacy, made-for-kids). " +
+      "Only the fields you pass are changed; everything else is preserved (the current video is read first). " +
+      "Quota: 51 units (1 read + 50 update).",
     {
       id: z.string().describe("Video ID to update"),
       title: z.string().optional().describe("New video title"),
@@ -140,31 +142,50 @@ export function registerVideoTools(
         .enum(["public", "private", "unlisted"])
         .optional()
         .describe("New privacy status"),
+      selfDeclaredMadeForKids: z
+        .boolean()
+        .optional()
+        .describe("Set the video's made-for-kids (COPPA) declaration"),
     },
     async (args) => {
+      // videos.update replaces whole parts: any snippet/status field we omit is
+      // reset. Read the current values and merge so nothing is lost.
+      const current = await client.execute((api) =>
+        api.videos.list({ part: ["snippet", "status"], id: [args.id] }),
+      );
+      const video = current.data.items?.[0];
+      if (!video) {
+        throw new Error(`Video ${args.id} not found on this channel.`);
+      }
+      const snip = video.snippet ?? {};
+      const stat = video.status ?? {};
+      const privacyStatus = args.privacyStatus ?? stat.privacyStatus;
+
+      const snippet = {
+        title: args.title ?? snip.title ?? "",
+        description: args.description ?? snip.description ?? "",
+        tags:
+          args.tags !== undefined
+            ? args.tags.split(",").map((t) => t.trim()).filter(Boolean)
+            : snip.tags,
+        categoryId: args.categoryId ?? snip.categoryId,
+        defaultLanguage: snip.defaultLanguage,
+      };
+      const status = {
+        privacyStatus,
+        embeddable: stat.embeddable,
+        license: stat.license,
+        publicStatsViewable: stat.publicStatsViewable,
+        selfDeclaredMadeForKids:
+          args.selfDeclaredMadeForKids ?? stat.selfDeclaredMadeForKids ?? stat.madeForKids,
+        // A scheduled publish time is only valid while the video is private.
+        ...(stat.publishAt && privacyStatus === "private" ? { publishAt: stat.publishAt } : {}),
+      };
+
       const result = await client.execute((api) =>
         api.videos.update({
           part: ["snippet", "status"],
-          requestBody: {
-            id: args.id,
-            snippet: {
-              title: args.title ?? "",
-              ...(args.description !== undefined && {
-                description: args.description,
-              }),
-              ...(args.tags !== undefined && {
-                tags: args.tags.split(",").map((t) => t.trim()),
-              }),
-              ...(args.categoryId !== undefined && {
-                categoryId: args.categoryId,
-              }),
-            },
-            ...(args.privacyStatus && {
-              status: {
-                privacyStatus: args.privacyStatus,
-              },
-            }),
-          },
+          requestBody: { id: args.id, snippet, status },
         }),
       );
 

@@ -19,6 +19,7 @@ import { registerMemberTools } from "./tools/members.js";
 import { registerI18nTools } from "./tools/i18n.js";
 import { registerVideoCategoryTools } from "./tools/video-categories.js";
 import { registerVideoAbuseTools } from "./tools/video-abuse.js";
+import { registerUploadFromUrlTools } from "./tools/upload-from-url.js";
 
 /**
  * Register all YouTube tools on an MCP server with the given client.
@@ -42,6 +43,7 @@ function registerAllTools(server: McpServer, client: YouTubeClient): void {
   registerI18nTools(server, client);
   registerVideoCategoryTools(server, client);
   registerVideoAbuseTools(server, client);
+  registerUploadFromUrlTools(server, client);
 }
 
 /**

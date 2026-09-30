@@ -76,6 +76,47 @@ describe("YouTubeAuth", () => {
     });
   });
 
+  describe("token sources and refresh errors", () => {
+    const saved = process.env.GOOGLE_REFRESH_TOKEN;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.GOOGLE_REFRESH_TOKEN;
+      else process.env.GOOGLE_REFRESH_TOKEN = saved;
+    });
+
+    it("uses GOOGLE_REFRESH_TOKEN over the token file (so /authorize can't swap accounts)", async () => {
+      process.env.GOOGLE_REFRESH_TOKEN = "env-refresh";
+      await fs.writeFile(
+        path.join(tmpDir, "tokens.json"),
+        JSON.stringify({ access_token: "a", refresh_token: "attacker-refresh", expiry_date: Date.now() + 3600e3 }),
+      );
+      const oauth = (auth as any).oauth2Client;
+      oauth.refreshAccessToken = async () => ({ credentials: { access_token: "x", refresh_token: "env-refresh", expiry_date: Date.now() + 3600e3 } });
+      const client = await auth.getClient();
+      expect(client.credentials.refresh_token).toBe("env-refresh");
+    });
+
+    it("keeps the refresh token when a refresh response omits it", async () => {
+      await fs.writeFile(path.join(tmpDir, "tokens.json"), JSON.stringify({ refresh_token: "keep-me" }));
+      await (auth as any).saveTokens({ access_token: "new", expiry_date: 1 });
+      const stored = JSON.parse(await fs.readFile(path.join(tmpDir, "tokens.json"), "utf-8"));
+      expect(stored).toMatchObject({ access_token: "new", refresh_token: "keep-me" });
+    });
+
+    it("reports Google's error code with a hint, without leaking the token", async () => {
+      process.env.GOOGLE_REFRESH_TOKEN = "super-secret-refresh";
+      const oauth = (auth as any).oauth2Client;
+      oauth.refreshAccessToken = async () => {
+        const e: any = new Error("invalid_grant");
+        e.response = { data: { error: "invalid_grant", error_description: "Token has been expired or revoked." } };
+        throw e;
+      };
+      const err: Error = await auth.getClient().then(() => { throw new Error("should fail"); }, (e) => e);
+      expect(err.message).toMatch(/invalid_grant/);
+      expect(err.message).toMatch(/Testing/);
+      expect(err.message).not.toContain("super-secret-refresh");
+    });
+  });
+
   describe("YOUTUBE_SCOPES", () => {
     it("has all required scope categories", () => {
       expect(YOUTUBE_SCOPES.readonly).toContain("youtube.readonly");

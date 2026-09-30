@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-30
+
+### Added
+- `youtube_upload_video_from_url`: download a video from an HTTPS link (Google Drive, Dropbox, presigned URLs) to a private temp file, upload it to YouTube, optionally set a thumbnail, then delete the temp file. Defaults: category 1 (Film & Animation), privacy private. Supports `selfDeclaredMadeForKids`.
+- `youtube_upload_status`: poll background upload jobs.
+- Safe downloader: HTTPS-only, SSRF protection with pinned DNS and per-redirect validation, optional host allowlist, size cap, timeouts, video/image magic-byte checks, no URL logging.
+
+### Changed
+- HTTP transport binds to `$PORT` (Render) when `--port` is not given.
+- `youtube_videos_update` now reads the current video and merges changes, so updating one field (e.g. privacy) no longer blanks the title or resets category, tags, or the made-for-kids flag. Adds `selfDeclaredMadeForKids`.
+- `youtube_videos_insert` description clarifies it needs a path on the server.
+
+### Fixed
+- Stale HTTP transport test (single options argument).
+- Token refresh errors now include Google's error code (e.g. `invalid_grant`) with a fix hint; token values are never included.
+- Saving refreshed tokens no longer drops the stored refresh token.
+
 ## [1.0.0] - 2026-03-10
 
 ### Added

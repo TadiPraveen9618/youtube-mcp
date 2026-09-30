@@ -1,6 +1,6 @@
 {
   "name": "@prmichaelsen/youtube-mcp",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "MCP server wrapping the YouTube Data API v3 for AI agents",
   "main": "dist/index.js",
   "exports": {

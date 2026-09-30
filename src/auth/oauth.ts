@@ -108,10 +108,28 @@ export class YouTubeAuth {
       const { credentials } = await this.oauth2Client.refreshAccessToken();
       this.oauth2Client.setCredentials(credentials);
       await this.saveTokens(credentials);
-    } catch {
+    } catch (err) {
+      // Surface Google's error code (e.g. invalid_grant, unauthorized_client) —
+      // it is not secret and tells you what to fix. Never include token values.
+      const data = (err as { response?: { data?: { error?: unknown; error_description?: unknown } } })
+        ?.response?.data;
+      const code = typeof data?.error === "string" ? data.error : undefined;
+      const desc =
+        typeof data?.error_description === "string" ? data.error_description : undefined;
+      const hints: Record<string, string> = {
+        invalid_grant:
+          "The refresh token is expired or revoked. If the OAuth consent screen is in 'Testing' mode, " +
+          "Google expires refresh tokens after 7 days — publish the app ('In production'), then re-authorize.",
+        unauthorized_client:
+          "The refresh token was issued for a different OAuth client than GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET.",
+        invalid_client: "GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is wrong.",
+      };
       throw new Error(
-        "Failed to refresh access token. The refresh token may have been revoked. " +
-          "Re-authorize using the authorization flow.",
+        "Failed to refresh access token" +
+          (code ? ` (Google: ${code}${desc ? ` — ${desc}` : ""})` : "") +
+          ". " +
+          (code && hints[code] ? hints[code] + " " : "") +
+          "Generate a new refresh token and update GOOGLE_REFRESH_TOKEN (see README: Fixing 'Failed to refresh access token').",
       );
     }
   }
@@ -121,8 +139,19 @@ export class YouTubeAuth {
    */
   private async saveTokens(tokens: Credentials): Promise<void> {
     const dir = path.dirname(this.tokenPath);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(this.tokenPath, JSON.stringify(tokens), {
+    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+    // Refresh responses usually omit refresh_token — keep the one we have.
+    let existing: Credentials = {};
+    try {
+      existing = JSON.parse(await fs.readFile(this.tokenPath, "utf-8")) as Credentials;
+    } catch {
+      // no existing file
+    }
+    const merged: Credentials = { ...existing, ...tokens };
+    if (!tokens.refresh_token && existing.refresh_token) {
+      merged.refresh_token = existing.refresh_token;
+    }
+    await fs.writeFile(this.tokenPath, JSON.stringify(merged), {
       mode: 0o600, // Owner read/write only
     });
   }
@@ -131,23 +160,22 @@ export class YouTubeAuth {
    * Load tokens from disk. Returns null if no stored tokens.
    */
   private async loadTokens(): Promise<Credentials | null> {
-  // On Render, use the refresh token stored in an environment variable.
-  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+    // On Render, the refresh token in the environment is authoritative. It
+    // deliberately wins over the token file so that someone visiting the public
+    // /authorize page cannot swap in a different Google account.
+    const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+    if (refreshToken) {
+      return { refresh_token: refreshToken };
+    }
 
-  if (refreshToken) {
-    return {
-      refresh_token: refreshToken,
-    };
+    // Local fallback: tokens saved by the /authorize → /callback flow.
+    try {
+      const data = await fs.readFile(this.tokenPath, "utf-8");
+      return JSON.parse(data) as Credentials;
+    } catch {
+      return null;
+    }
   }
-
-  // Local fallback: use the token file.
-  try {
-    const data = await fs.readFile(this.tokenPath, "utf-8");
-    return JSON.parse(data) as Credentials;
-  } catch {
-    return null;
-  }
-}
 
   /**
    * Check if stored credentials exist.

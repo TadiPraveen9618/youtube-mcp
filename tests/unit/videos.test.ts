@@ -144,3 +144,43 @@ describe("Video Tools Registration", () => {
     expect(tool.description).toMatch(/like|dislike|rate/i);
   });
 });
+
+describe("youtube_videos_update preserves existing fields", () => {
+  it("merges with the current video so publishing does not wipe metadata or the kids flag", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const { client: yt, executeMock } = createMockClient();
+    const updateCalls: any[] = [];
+    const api = {
+      videos: {
+        list: async () => ({
+          data: {
+            items: [
+              {
+                id: "v1",
+                snippet: { title: "Old title", description: "Desc", tags: ["a"], categoryId: "1" },
+                status: { privacyStatus: "private", selfDeclaredMadeForKids: true, license: "youtube", embeddable: true },
+              },
+            ],
+          },
+        }),
+        update: async (p: any) => {
+          updateCalls.push(p);
+          return { data: p.requestBody };
+        },
+      },
+    };
+    executeMock.mockImplementation(async (fn: any) => fn(api));
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerVideoTools(server, yt);
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "t", version: "0" });
+    await Promise.all([server.connect(a), client.connect(b)]);
+
+    await client.callTool({ name: "youtube_videos_update", arguments: { id: "v1", privacyStatus: "public" } });
+
+    const body = updateCalls[0].requestBody;
+    expect(body.snippet).toMatchObject({ title: "Old title", description: "Desc", tags: ["a"], categoryId: "1" });
+    expect(body.status).toMatchObject({ privacyStatus: "public", selfDeclaredMadeForKids: true });
+  });
+});

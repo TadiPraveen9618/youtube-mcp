@@ -1,12 +1,13 @@
 # youtube-mcp
 
-MCP server wrapping the YouTube Data API v3 for AI agents. Provides 48 tools covering playlists, videos, channels, comments, captions, subscriptions, and more.
+MCP server wrapping the YouTube Data API v3 for AI agents. Provides 50 tools covering playlists, videos, channels, comments, captions, subscriptions, and more.
 
 > Built with [Agent Context Protocol](https://github.com/prmichaelsen/agent-context-protocol)
 
 ## Features
 
-- **48 MCP tools** covering the YouTube Data API v3
+- **50 MCP tools** covering the YouTube Data API v3
+- **Upload from URL**: upload a video from a Google Drive / Dropbox / HTTPS link, so a server on Render can publish files that live on your own PC
 - **OAuth 2.0** authentication with automatic token refresh
 - **Dual transport**: stdio (default) and Streamable HTTP
 - **Quota-aware**: every tool description includes its API quota cost
@@ -67,8 +68,147 @@ node dist/index.js --transport http --port 3000
 
 | Option | CLI | Env Var | Default |
 |--------|-----|---------|---------|
-| Port | `--port 3000` | `HTTP_PORT` | 3000 |
+| Port | `--port 3000` | `PORT` (set by Render), then `HTTP_PORT` | 3000 |
 | Host | `--host 0.0.0.0` | `HTTP_HOST` | 0.0.0.0 |
+
+## Uploading videos from your computer (Render deployment)
+
+A server hosted on Render cannot read files on your PC, so `youtube_videos_insert`
+(which takes a server-side file path) can't upload them. Use
+**`youtube_upload_video_from_url`** instead:
+
+1. Put the MP4 somewhere reachable over HTTPS: Google Drive, Dropbox, or any
+   presigned S3/R2/GCS URL.
+2. Ask Claude to upload it and paste the link.
+3. The server downloads the file to a private temp folder on Render (mode 0600),
+   checks that it really is a video, uploads it to YouTube with the channel's
+   existing OAuth credentials, optionally sets a thumbnail, and deletes the temp
+   folder — on success *and* on failure.
+
+### How to share the file (Google Drive — recommended)
+
+1. Upload the MP4 to Google Drive (drag it into drive.google.com).
+2. Right-click the file → **Share** → **General access** → **Anyone with the link** (Viewer).
+3. **Copy link** — it looks like `https://drive.google.com/file/d/<FILE_ID>/view?usp=sharing`.
+   Paste it as-is; the server converts it to a direct download (including large
+   files that show Drive's "can't scan for viruses" page).
+4. After the upload is confirmed, set sharing back to **Restricted**.
+
+**Dropbox:** Share → Copy link. `?dl=0` is changed to `?dl=1` automatically.
+
+A link that returns a web page (sign-in page, "request access" page) is rejected
+with a clear error instead of being uploaded to YouTube.
+
+### Example prompt
+
+> Upload https://drive.google.com/file/d/1AbC.../view to YouTube with
+> `youtube_upload_video_from_url`: title "…", description "…", tags "a, b, c",
+> made for kids = true. Keep it private.
+
+### Tool parameters — `youtube_upload_video_from_url`
+
+| Parameter | Required | Default | Notes |
+|-----------|----------|---------|-------|
+| `videoUrl` | yes | — | Public HTTPS link. Drive/Dropbox share links are converted automatically |
+| `title` | yes | — | Max 100 characters, no `<` or `>` |
+| `description` | no | — | Max 5000 bytes, no `<` or `>` |
+| `tags` | no | — | Comma-separated. Checked against YouTube's 500-character limit |
+| `categoryId` | no | `1` (Film & Animation) | See `youtube_video_categories_list` |
+| `privacyStatus` | no | `private` | `private`, `unlisted`, `public` |
+| `selfDeclaredMadeForKids` | no | not set | `true` marks the video as made for kids (COPPA) |
+| `thumbnailUrl` | no | — | JPEG/PNG, max 2 MB. Requires a phone-verified channel; if it fails, the video still uploads and the error is reported |
+| `waitSeconds` | no | `45` | How long the call waits before returning. Uploads keep running in the background after that |
+
+The upload runs as a background job, so large files don't hit client timeouts.
+If the result says `downloading` or `uploading`, call **`youtube_upload_status`**
+with the `jobId` until it says `completed` (you get `videoId`, `uploadStatus`,
+`privacyStatus`, `selfDeclaredMadeForKids`, and a YouTube Studio link) or
+`failed` (you get the reason). Only one upload runs at a time. Job history is
+kept in memory for 24 hours or until the service restarts.
+
+**Render free plan:** free services sleep after ~15 minutes without incoming
+requests. Polling `youtube_upload_status` every minute or two keeps the service
+awake during a long upload.
+
+### Security
+
+- HTTPS only; URLs with embedded `user:password@` are rejected.
+- SSRF protection: hosts that resolve to loopback, private, link-local
+  (including `169.254.169.254` cloud metadata), CGNAT, or other internal
+  addresses are refused. The checked IP is pinned for the connection, and every
+  redirect hop is re-validated (max 5).
+- Optional host allowlist: `UPLOAD_ALLOWED_HOSTS`.
+- Size cap from `Content-Length` *and* while streaming; free disk space checked first.
+- Temp files live in a `mkdtemp` directory with mode 0600 and are always deleted.
+- The downloaded file must be a real video container (MP4/MOV/WebM/MKV/AVI/…), checked by its magic bytes.
+- Full URLs are never logged or stored (share and presigned links can contain
+  secrets) — only the host name. OAuth tokens and client secrets are never
+  logged or returned.
+
+### Environment variables (Render → your service → Environment)
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `GOOGLE_CLIENT_ID` | yes | — | OAuth client |
+| `GOOGLE_CLIENT_SECRET` | yes | — | OAuth client |
+| `GOOGLE_REFRESH_TOKEN` | yes | — | Refresh token for the channel |
+| `GOOGLE_REDIRECT_URI` | for `/authorize` only | — | `https://<your-service>.onrender.com/callback` |
+| `TRANSPORT` | yes | `stdio` | Must be `http` on Render (or pass `--transport http`) |
+| `PORT` | auto | — | Set by Render automatically. The server now binds to it |
+| `MAX_UPLOAD_SIZE_MB` | no | `2048` | Largest video accepted |
+| `UPLOAD_ALLOWED_HOSTS` | no | any public host | Recommended: `drive.google.com,drive.usercontent.google.com,googleusercontent.com,dropbox.com,dropboxusercontent.com` |
+| `UPLOAD_DOWNLOAD_TIMEOUT_MINUTES` | no | `30` | Abort downloads that take longer |
+| `UPLOAD_TMP_DIR` | no | OS temp dir | Where temp files are written |
+
+### Fixing "Failed to refresh access token"
+
+The error now includes Google's reason. The usual fixes:
+
+- **`invalid_grant`** — the refresh token expired or was revoked. If your OAuth
+  consent screen is in **Testing** mode, Google expires refresh tokens after
+  **7 days**. Go to Google Cloud Console → *Google Auth Platform → Audience* →
+  **Publish app** (an unverified app is fine for your own channel), then make a new token (below).
+- **`unauthorized_client`** — the token was created with a different OAuth client
+  than `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (for example, OAuth Playground
+  without "Use your own OAuth credentials").
+- **`invalid_client`** — the client ID or secret on Render is wrong.
+
+**Make a new refresh token (OAuth Playground):**
+
+1. Google Cloud Console → *Google Auth Platform → Clients* → your Web client →
+   add `https://developers.google.com/oauthplayground` to **Authorized redirect URIs** → Save.
+2. Open https://developers.google.com/oauthplayground → gear icon → tick
+   **Use your own OAuth credentials** → paste your Client ID and Client secret.
+3. In *Step 1*, paste these scopes (one per line) and click **Authorize APIs**:
+   ```
+   https://www.googleapis.com/auth/youtube
+   https://www.googleapis.com/auth/youtube.upload
+   https://www.googleapis.com/auth/youtube.force-ssl
+   https://www.googleapis.com/auth/youtube.readonly
+   ```
+4. Sign in and **choose the channel** you want to manage (a brand-account
+   channel appears as its own entry in the chooser). If you see "Google hasn't
+   verified this app", click *Advanced → Go to … (unsafe)* — it is your own app.
+5. In *Step 2*, click **Exchange authorization code for tokens** and copy the **Refresh token**.
+6. Render → your service → *Environment* → set `GOOGLE_REFRESH_TOKEN` to the new
+   value → *Save* (Render redeploys automatically).
+7. Check it works: ask Claude to run `youtube_channels_list` with `mine: true`.
+
+`GOOGLE_REFRESH_TOKEN` always takes priority over tokens saved by `/authorize`,
+so a visitor to that public page cannot switch the server to another account.
+
+### Render service settings
+
+| Setting | Value |
+|---------|-------|
+| Build command | `npm ci && npm run build` |
+| Start command | `node dist/index.js --transport http` |
+| Health check path | `/health` |
+
+Don't pass `--port`; the server picks up Render's `$PORT` automatically.
+Render's ephemeral disk is enough for the temp file because it is deleted after
+each upload. Keep `MAX_UPLOAD_SIZE_MB` below the free disk space on your instance.
+
 
 ## Tools Reference
 
@@ -96,13 +236,15 @@ node dist/index.js --transport http --port 3000
 |------|-------------|-------|
 | `youtube_search` | Search for videos, channels, or playlists | 100 |
 
-### Videos (6 tools)
+### Videos (8 tools)
 
 | Tool | Description | Quota |
 |------|-------------|-------|
 | `youtube_videos_list` | List videos by ID, chart, or user rating | 1 |
-| `youtube_videos_insert` | Upload a video (streaming) | 1600 |
-| `youtube_videos_update` | Update video metadata | 50 |
+| `youtube_videos_insert` | Upload a video from a path on the server's disk | 1600 |
+| `youtube_upload_video_from_url` | Download a video from an HTTPS link, upload it, delete the temp file | 1600 (+50 thumbnail) |
+| `youtube_upload_status` | Check progress of an upload-from-URL job | 0 |
+| `youtube_videos_update` | Update video metadata (merges with current values) | 51 |
 | `youtube_videos_delete` | Delete a video | 50 |
 | `youtube_videos_rate` | Rate a video (like/dislike/none) | 50 |
 | `youtube_videos_get_rating` | Get user's rating for videos | 1 |
@@ -239,7 +381,7 @@ The YouTube Data API has a daily quota of 10,000 units by default. Key costs:
 ```bash
 npm run dev        # Watch mode with tsx
 npm run build      # Production build with esbuild
-npm test           # Run tests (101 passing)
+npm test           # Run tests (135 passing)
 npm run typecheck  # TypeScript type checking
 ```
 

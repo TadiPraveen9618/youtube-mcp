@@ -7,10 +7,10 @@ describe("HTTP Transport Module", () => {
     expect(typeof mod.startHttpTransport).toBe("function");
   });
 
-  it("startHttpTransport accepts McpServer and options", async () => {
+  it("startHttpTransport accepts a single options object", async () => {
     const mod = await import("../../src/transport/http.js");
     // Verify the function signature accepts the expected params
-    expect(mod.startHttpTransport.length).toBeGreaterThanOrEqual(2);
+    expect(mod.startHttpTransport.length).toBe(1);
   });
 });
 

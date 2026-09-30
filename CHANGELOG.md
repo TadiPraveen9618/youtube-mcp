@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `youtube_upload_video_from_url`: download a video from an HTTPS link (Google Drive, Dropbox, presigned URLs) to a private temp file, upload it to YouTube, optionally set a thumbnail, then delete the temp file. Defaults: category 1 (Film & Animation), privacy private. Supports `selfDeclaredMadeForKids`.
 - `youtube_upload_status`: poll background upload jobs.
+- `youtube_auth_status`: non-secret OAuth diagnostics and a live channel check.
+- `/authorize` is protected by `SETUP_KEY` and a one-time `state`; `/callback` verifies the channel and shows the new refresh token to copy into Render.
 - Safe downloader: HTTPS-only, SSRF protection with pinned DNS and per-redirect validation, optional host allowlist, size cap, timeouts, video/image magic-byte checks, no URL logging.
 
 ### Changed
@@ -21,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stale HTTP transport test (single options argument).
 - Token refresh errors now include Google's error code (e.g. `invalid_grant`) with a fix hint; token values are never included.
 - Saving refreshed tokens no longer drops the stored refresh token.
+- Access tokens are cached until expiry instead of refreshing on every call; stray whitespace in `GOOGLE_REFRESH_TOKEN` is trimmed.
+- `/callback` error output is HTML-escaped.
 
 ## [1.0.0] - 2026-03-10
 

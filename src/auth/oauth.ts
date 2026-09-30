@@ -31,6 +31,10 @@ export interface OAuthConfig {
 export class YouTubeAuth {
   private oauth2Client: OAuth2Client;
   private tokenPath: string;
+  /** Tokens from a setup-key-protected /authorize run (in memory only). */
+  private runtimeTokens: Credentials | null = null;
+  /** Last successfully refreshed credentials, reused until near expiry. */
+  private cached: Credentials | null = null;
 
   constructor(private config: OAuthConfig) {
     this.oauth2Client = new google.auth.OAuth2(
@@ -53,7 +57,12 @@ export class YouTubeAuth {
    * Loads stored tokens if available and refreshes if expired.
    */
   async getClient(): Promise<OAuth2Client> {
-    const tokens = await this.loadTokens();
+    const loaded = await this.loadTokens();
+    // Reuse the last refreshed access token while it is still valid.
+    const tokens =
+      loaded && this.cached && this.cached.refresh_token === loaded.refresh_token
+        ? this.cached
+        : loaded;
     if (!tokens) {
       throw new Error(
         "No stored credentials found. Run the authorization flow first. " +
@@ -74,21 +83,44 @@ export class YouTubeAuth {
   /**
    * Generate an authorization URL for the user to visit.
    */
-  getAuthUrl(scopes: string[] = ALL_SCOPES): string {
+  getAuthUrl(scopes: string[] = ALL_SCOPES, state?: string): string {
     return this.oauth2Client.generateAuthUrl({
       access_type: "offline",
       scope: scopes,
       prompt: "consent",
+      include_granted_scopes: true,
+      ...(state ? { state } : {}),
     });
+  }
+
+  /** Non-secret facts about the configuration, for diagnostics. */
+  describe(): { clientId: string; redirectUri: string; tokenSource: string } {
+    return {
+      clientId: this.config.clientId,
+      redirectUri: this.config.redirectUri,
+      tokenSource: this.runtimeTokens
+        ? "authorized via /authorize since last restart (copy it into GOOGLE_REFRESH_TOKEN to keep it)"
+        : process.env.GOOGLE_REFRESH_TOKEN
+          ? "GOOGLE_REFRESH_TOKEN environment variable"
+          : "token file / none",
+    };
   }
 
   /**
    * Exchange an authorization code for tokens and store them.
    */
-  async exchangeCode(code: string): Promise<void> {
+  async exchangeCode(code: string): Promise<Credentials> {
     const { tokens } = await this.oauth2Client.getToken(code);
     this.oauth2Client.setCredentials(tokens);
-    await this.saveTokens(tokens);
+    // Only reached through the setup-key-protected flow, so it is safe to
+    // use these tokens immediately (they win over GOOGLE_REFRESH_TOKEN until
+    // the next restart).
+    if (tokens.refresh_token) {
+      this.runtimeTokens = tokens;
+      this.cached = tokens;
+    }
+    await this.saveTokens(tokens).catch(() => undefined);
+    return tokens;
   }
 
   /**
@@ -107,6 +139,7 @@ export class YouTubeAuth {
     try {
       const { credentials } = await this.oauth2Client.refreshAccessToken();
       this.oauth2Client.setCredentials(credentials);
+      this.cached = credentials;
       await this.saveTokens(credentials);
     } catch (err) {
       // Surface Google's error code (e.g. invalid_grant, unauthorized_client) —
@@ -163,7 +196,10 @@ export class YouTubeAuth {
     // On Render, the refresh token in the environment is authoritative. It
     // deliberately wins over the token file so that someone visiting the public
     // /authorize page cannot swap in a different Google account.
-    const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+    if (this.runtimeTokens) {
+      return this.runtimeTokens;
+    }
+    const refreshToken = process.env.GOOGLE_REFRESH_TOKEN?.trim();
     if (refreshToken) {
       return { refresh_token: refreshToken };
     }

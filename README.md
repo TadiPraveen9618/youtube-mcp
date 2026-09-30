@@ -1,12 +1,12 @@
 # youtube-mcp
 
-MCP server wrapping the YouTube Data API v3 for AI agents. Provides 50 tools covering playlists, videos, channels, comments, captions, subscriptions, and more.
+MCP server wrapping the YouTube Data API v3 for AI agents. Provides 51 tools covering playlists, videos, channels, comments, captions, subscriptions, and more.
 
 > Built with [Agent Context Protocol](https://github.com/prmichaelsen/agent-context-protocol)
 
 ## Features
 
-- **50 MCP tools** covering the YouTube Data API v3
+- **51 MCP tools** covering the YouTube Data API v3
 - **Upload from URL**: upload a video from a Google Drive / Dropbox / HTTPS link, so a server on Render can publish files that live on your own PC
 - **OAuth 2.0** authentication with automatic token refresh
 - **Dual transport**: stdio (default) and Streamable HTTP
@@ -153,6 +153,7 @@ awake during a long upload.
 | `GOOGLE_CLIENT_SECRET` | yes | — | OAuth client |
 | `GOOGLE_REFRESH_TOKEN` | yes | — | Refresh token for the channel |
 | `GOOGLE_REDIRECT_URI` | for `/authorize` only | — | `https://<your-service>.onrender.com/callback` |
+| `SETUP_KEY` | to re-authorize | — | Protects `/authorize`. Use Render's **Generate** button |
 | `TRANSPORT` | yes | `stdio` | Must be `http` on Render (or pass `--transport http`) |
 | `PORT` | auto | — | Set by Render automatically. The server now binds to it |
 | `MAX_UPLOAD_SIZE_MB` | no | `2048` | Largest video accepted |
@@ -173,29 +174,27 @@ The error now includes Google's reason. The usual fixes:
   without "Use your own OAuth credentials").
 - **`invalid_client`** — the client ID or secret on Render is wrong.
 
-**Make a new refresh token (OAuth Playground):**
+**Make a new refresh token (built-in, recommended).** This mints the token with
+the exact client ID/secret Render uses, so `unauthorized_client` can't happen:
 
-1. Google Cloud Console → *Google Auth Platform → Clients* → your Web client →
-   add `https://developers.google.com/oauthplayground` to **Authorized redirect URIs** → Save.
-2. Open https://developers.google.com/oauthplayground → gear icon → tick
-   **Use your own OAuth credentials** → paste your Client ID and Client secret.
-3. In *Step 1*, paste these scopes (one per line) and click **Authorize APIs**:
-   ```
-   https://www.googleapis.com/auth/youtube
-   https://www.googleapis.com/auth/youtube.upload
-   https://www.googleapis.com/auth/youtube.force-ssl
-   https://www.googleapis.com/auth/youtube.readonly
-   ```
-4. Sign in and **choose the channel** you want to manage (a brand-account
-   channel appears as its own entry in the chooser). If you see "Google hasn't
-   verified this app", click *Advanced → Go to … (unsafe)* — it is your own app.
-5. In *Step 2*, click **Exchange authorization code for tokens** and copy the **Refresh token**.
-6. Render → your service → *Environment* → set `GOOGLE_REFRESH_TOKEN` to the new
-   value → *Save* (Render redeploys automatically).
-7. Check it works: ask Claude to run `youtube_channels_list` with `mine: true`.
+1. Google Cloud Console → *Google Auth Platform → Clients* → your **Web application**
+   client → **Authorized redirect URIs** must contain
+   `https://<your-service>.onrender.com/callback`, and Render's `GOOGLE_REDIRECT_URI`
+   must be exactly the same string.
+2. Render → *Environment* → add `SETUP_KEY` (click **Generate** for a random value) → Save.
+3. Open `https://<your-service>.onrender.com/authorize?key=<SETUP_KEY>` in your browser
+   (copy the key from Render yourself; never paste it into a chat).
+4. Sign in, **choose the channel** (brand-account channels appear as their own
+   entry), allow access. The page confirms which channel is connected and shows
+   the new refresh token.
+5. The server uses it immediately. To keep it after restarts: Render →
+   *Environment* → `GOOGLE_REFRESH_TOKEN` → paste → Save.
+6. Verify: ask Claude to run `youtube_auth_status`.
 
-`GOOGLE_REFRESH_TOKEN` always takes priority over tokens saved by `/authorize`,
-so a visitor to that public page cannot switch the server to another account.
+`/authorize` is disabled unless `SETUP_KEY` is set and supplied, and `/callback`
+only accepts a one-time `state` issued by `/authorize`.
+
+`GOOGLE_REFRESH_TOKEN` takes priority over the token file on disk.
 
 ### Render service settings
 
@@ -236,7 +235,7 @@ each upload. Keep `MAX_UPLOAD_SIZE_MB` below the free disk space on your instanc
 |------|-------------|-------|
 | `youtube_search` | Search for videos, channels, or playlists | 100 |
 
-### Videos (8 tools)
+### Videos (9 tools)
 
 | Tool | Description | Quota |
 |------|-------------|-------|
@@ -244,6 +243,7 @@ each upload. Keep `MAX_UPLOAD_SIZE_MB` below the free disk space on your instanc
 | `youtube_videos_insert` | Upload a video from a path on the server's disk | 1600 |
 | `youtube_upload_video_from_url` | Download a video from an HTTPS link, upload it, delete the temp file | 1600 (+50 thumbnail) |
 | `youtube_upload_status` | Check progress of an upload-from-URL job | 0 |
+| `youtube_auth_status` | Show which channel/OAuth client the server uses and whether auth works (no secrets) | 1 |
 | `youtube_videos_update` | Update video metadata (merges with current values) | 51 |
 | `youtube_videos_delete` | Delete a video | 50 |
 | `youtube_videos_rate` | Rate a video (like/dislike/none) | 50 |

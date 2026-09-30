@@ -20,6 +20,7 @@ import { registerI18nTools } from "./tools/i18n.js";
 import { registerVideoCategoryTools } from "./tools/video-categories.js";
 import { registerVideoAbuseTools } from "./tools/video-abuse.js";
 import { registerUploadFromUrlTools } from "./tools/upload-from-url.js";
+import { registerAuthStatusTool } from "./tools/auth-status.js";
 
 /**
  * Register all YouTube tools on an MCP server with the given client.
@@ -58,6 +59,7 @@ export function createServer(auth?: YouTubeAuth): McpServer {
   if (auth) {
     const client = new YouTubeClient(auth);
     registerAllTools(server, client);
+    registerAuthStatusTool(server, auth, client);
   }
 
   return server;

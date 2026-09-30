@@ -273,6 +273,27 @@ if (url.pathname === "/privacy") {
             }
           }
 
+          // A session ID we don't know means the server restarted (Render
+          // sleep/redeploy) and the in-memory session is gone. The MCP spec
+          // requires 404 here: that is the signal for the client to start a
+          // new session with a fresh `initialize`. Answering 400 instead left
+          // Claude stuck on a dead session.
+          if (sessionId) {
+            console.error(`Unknown MCP session ${sessionId} (${req.method}); asking client to re-initialize`);
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                error: {
+                  code: -32001,
+                  message: "Session not found. Send a new initialize request.",
+                },
+                id: null,
+              }),
+            );
+            return;
+          }
+
           res.writeHead(400, {
             "Content-Type": "application/json",
           });

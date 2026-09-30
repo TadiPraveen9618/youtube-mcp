@@ -53,7 +53,41 @@ export async function startHttpTransport(
           `http://${req.headers.host || "localhost"}`,
         );
 
-        if (url.pathname === "/health") {
+       
+       
+       
+       if (url.pathname === "/") {
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(`
+    <html>
+      <head><title>Bhabbi World Claude</title></head>
+      <body>
+        <h1>Bhabbi World Claude</h1>
+        <p>This application connects Claude with the Bhabbi World YouTube channel.</p>
+        <p>Powered by the YouTube Data API.</p>
+      </body>
+    </html>
+  `);
+  return;
+}
+
+if (url.pathname === "/privacy") {
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(`
+    <html>
+      <head><title>Privacy Policy - Bhabbi World Claude</title></head>
+      <body>
+        <h1>Privacy Policy</h1>
+        <p>Bhabbi World Claude uses Google OAuth and the YouTube Data API to manage the authorized Bhabbi World YouTube channel.</p>
+        <p>The application only accesses YouTube data that the account owner has authorized.</p>
+        <p>We do not sell or share personal information with third parties.</p>
+        <p>OAuth credentials are used only to provide the requested YouTube management functionality.</p>
+        <p>For questions, contact the application owner through the Google account associated with this application.</p>
+      </body>
+    </html>
+  `);
+  return;
+} if (url.pathname === "/health") {
           res.writeHead(200, {
             "Content-Type": "application/json",
           });
